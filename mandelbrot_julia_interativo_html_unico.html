@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mandelbrot ↔ Julia — Interativo</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#131a22; --ink:#e7eef7; --muted:#a8b3c7; --accent:#7cd2ff; --ok:#a8ff60; --warn:#ffd166;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial}
+  .app{display:grid;grid-template-rows:auto 1fr; height:100%;}
+  header{display:flex;gap:12px;align-items:center;padding:10px 14px;background:linear-gradient(180deg, #0e141b, #0a0f14);border-bottom:1px solid #121920;position:sticky;top:0;z-index:2}
+  header h1{font-size:16px;margin:0 6px 0 0;font-weight:700;letter-spacing:.2px}
+  header .pill{padding:6px 10px;border:1px solid #223241;border-radius:999px;color:var(--muted)}
+  header .controls{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+  button, select{background:#18222e;color:var(--ink);border:1px solid #2a3a4c;border-radius:10px;padding:8px 10px;cursor:pointer}
+  button:hover{border-color:#3e5670}
+  button:active{transform:translateY(1px)}
+  .main{display:grid;grid-template-columns:1fr minmax(260px, 320px); gap:10px; height:100%;}
+  .view{display:grid;grid-template-columns:1fr 1fr; gap:8px; padding:10px}
+  .card{background:var(--panel);border:1px solid #1b2532;border-radius:16px;position:relative;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .card h2{position:absolute;top:8px;left:12px;margin:0;color:#cfe4ff;font-size:12px;background:rgba(0,0,0,.35);padding:4px 8px;border-radius:8px;border:1px solid #273446}
+  canvas{display:block;width:100%;height:100%}
+  .sidebar{padding:12px;display:flex;flex-direction:column;gap:12px;background:var(--panel);border-left:1px solid #1b2532}
+  .row{display:grid;grid-template-columns:90px 1fr;gap:8px;align-items:center}
+  .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; color:#cfe4ff}
+  .hint{color:var(--muted);font-size:12px}
+  .kbd{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0e141b;padding:2px 6px;border:1px solid #253244;border-radius:6px}
+  .legend{padding:10px;border:1px dashed #334357;border-radius:12px}
+  .dot{position:absolute; width:10px; height:10px; border-radius:50%; background:var(--accent); border:2px solid #001521; transform:translate(-50%, -50%); pointer-events:none}
+  .overlay{position:absolute; inset:0; pointer-events:none}
+  .stat{position:absolute; bottom:6px; left:8px; right:8px; display:flex; gap:8px; flex-wrap:wrap; color:#b8c6d9; font-size:12px; background:linear-gradient(180deg, rgba(0,0,0,0), rgba(0,0,0,.35)); padding:6px 6px 8px}
+  .badge{border:1px solid #223241; border-radius:8px; padding:2px 6px; background:#0c1218}
+  .test{border:1px solid #334357; border-radius:10px; padding:8px}
+  .test .ok{color:var(--ok)}
+  .test .warn{color:var(--warn)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Mandelbrot ↔ Julia</h1>
+    <div class="pill">Clique em um ponto de Mandelbrot para ver o Julia correspondente</div>
+    <div class="controls">
+      <button id="resetBtn">Reiniciar</button>
+      <button id="fitBtn">Enquadrar</button>
+      <button id="swapBtn">Trocar visões</button>
+      <select id="paletteSel" title="Paleta">
+        <option value="classic">Gradiente clássico</option>
+        <option value="fire">Fogo</option>
+        <option value="ocean">Oceano</option>
+        <option value="gray">Cinza</option>
+      </select>
+      <select id=\"iterSel\" title=\"Iterações\">
+        <option>200</option>
+        <option selected>400</option>
+        <option>800</option>
+        <option>1200</option>
+      </select>
+      <button id=\"runTests\">Rodar testes</button>
+      <button id=\"saveBtn\">Salvar PNG</button>
+      <button id="runTests">Rodar testes</button>
+    </div>
+  </header>
+
+  <div class="main">
+    <div class="view" id="view">
+      <div class="card" id="mbCard">
+        <h2>Mandelbrot</h2>
+        <canvas id="mb"></canvas>
+        <div class="overlay">
+          <div id="cDot" class="dot" style="display:none"></div>
+          <div class="stat" id="mbStat"></div>
+        </div>
+      </div>
+      <div class="card" id="jlCard">
+        <h2>Julia</h2>
+        <canvas id="jl"></canvas>
+        <div class="overlay">
+          <div class="stat" id="jlStat"></div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="sidebar">
+      <div class="row"><div>c (Julia):</div><div class="mono" id="cVal">—</div></div>
+      <div class="row"><div>Centro:</div><div class="mono" id="centerVal">—</div></div>
+      <div class="row"><div>Escala:</div><div class="mono" id="scaleVal">—</div></div>
+      <div class="row"><div>Iterações:</div><div class="mono" id="iterVal">—</div></div>
+      <div class="legend hint">
+        Mouse: <span class="kbd">Wheel</span> zoom | <span class="kbd">Arrastar</span> mover | <span class="kbd">Clique</span> define c
+      </div>
+      <div class="hint">Dica: Dê zoom numa borda do cardioide e clique — Julias ficam mais interessantes próximos da fronteira.</div>
+      <div class="test" id="testPanel">
+        <div><strong>Testes</strong></div>
+        <div id="testOutput" class="mono hint">Pronto para testar.</div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ===== Utilidades =====
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const fmt = (z) => `${z.re.toFixed(8)} ${z.im>=0?'+':'-'} ${Math.abs(z.im).toFixed(8)}i`;
+  const makeComplex = (re, im) => ({re, im});
+  const palettes = {
+    classic: [[0,0,64],[0,128,255],[0,200,80],[255,255,0],[255,128,0],[255,0,0],[180,0,180]],
+    fire: [[0,0,0],[50,0,0],[120,20,0],[200,40,0],[255,120,0],[255,220,0],[255,255,255]],
+    ocean: [[0,4,16],[0,32,96],[0,96,192],[0,180,220],[120,240,255],[220,255,255],[255,255,255]],
+    gray: [[0,0,0],[255,255,255]]
+  };
+  function gradient(pal, t){
+    t = clamp(t,0,1);
+    const s = pal.length - 1;
+    const x = t * s; const i = Math.min(s-1, Math.floor(x));
+    const w = x - i; const a = pal[i], b = pal[i+1];
+    return [
+      Math.round(a[0]*(1-w) + b[0]*w),
+      Math.round(a[1]*(1-w) + b[1]*w),
+      Math.round(a[2]*(1-w) + b[2]*w)
+    ];
+  }
+
+  // ===== Estado =====
+  const mb = document.getElementById('mb');
+  const jl = document.getElementById('jl');
+  const mbCard = document.getElementById('mbCard');
+  const jlCard = document.getElementById('jlCard');
+  const cDot = document.getElementById('cDot');
+  const mbStat = document.getElementById('mbStat');
+  const jlStat = document.getElementById('jlStat');
+  const cVal = document.getElementById('cVal');
+  const centerVal = document.getElementById('centerVal');
+  const scaleVal = document.getElementById('scaleVal');
+  const iterVal = document.getElementById('iterVal');
+  const paletteSel = document.getElementById('paletteSel');
+  const iterSel = document.getElementById('iterSel');
+  const testOutput = document.getElementById('testOutput');
+
+  let maxIter = 400;
+  let palette = 'classic';
+
+  const view = { ctr: makeComplex(-0.5, 0), scale: 3.0 };
+  let juliaC = makeComplex(-0.4, 0.6);
+
+  function resizeCanvas(cv){
+    const rect = cv.getBoundingClientRect();
+    const w = Math.max(100, Math.floor(rect.width * dpr));
+    const h = Math.max(100, Math.floor(rect.height * dpr));
+    // Só altera se de fato mudou (evita loops de RO)
+    if(cv.width !== w || cv.height !== h){
+      cv.width=w; cv.height=h;
+    }
+    const g = cv.getContext('2d', {alpha:false});
+    g.setTransform(1,0,0,1,0,0);
+    return {g,w,h};
+  }
+
+  function screenToComplex(x, y){
+    const {width:w,height:h} = mb;
+    const aspect = h/w;
+    const xmin = view.ctr.re - view.scale/2;
+    const xmax = view.ctr.re + view.scale/2;
+    const ymin = view.ctr.im - (view.scale*aspect)/2;
+    const ymax = view.ctr.im + (view.scale*aspect)/2;
+    const re = xmin + (x/w) * (xmax - xmin);
+    const im = ymax - (y/h) * (ymax - ymin);
+    return {re, im};
+  }
+
+  function updateSidebar(){
+    centerVal.textContent = `${view.ctr.re.toFixed(8)} ${view.ctr.im>=0?'+':'-'} ${Math.abs(view.ctr.im).toFixed(8)}i`;
+    scaleVal.textContent = view.scale.toExponential(6);
+    iterVal.textContent = String(maxIter);
+    cVal.textContent = `${juliaC.re.toFixed(8)} ${juliaC.im>=0?'+':'-'} ${Math.abs(juliaC.im).toFixed(8)}i`;
+  }
+
+  // ===== Render (escape-time + smooth coloring) =====
+  function renderMandelbrot(){
+    const {g,w,h} = resizeCanvas(mb);
+    const img = g.createImageData(w,h);
+    const data = img.data;
+    const aspect = h/w;
+    const xmin = view.ctr.re - view.scale/2;
+    const xmax = view.ctr.re + view.scale/2;
+    const ymin = view.ctr.im - (view.scale*aspect)/2;
+    const ymax = view.ctr.im + (view.scale*aspect)/2;
+    const log2 = Math.log(2);
+
+    let row = 0;
+    function step(){
+      const pal = palettes[palette];
+      const y = row;
+      for(let x=0; x<w; x++){
+        const cr = xmin + (x/w) * (xmax - xmin);
+        const ci = ymax - (y/h) * (ymax - ymin);
+        let zr=0, zi=0, n=0;
+        let zr2=0, zi2=0;
+        for(; n<maxIter && (zr2+zi2)<=4; n++){
+          zi = 2*zr*zi + ci;
+          zr = zr2 - zi2 + cr;
+          zr2 = zr*zr; zi2 = zi*zi;
+        }
+        let r,gc,b;
+        if(n===maxIter){ r=0; gc=0; b=0; }
+        else{
+          const mod = Math.sqrt(zr2+zi2);
+          const nu = n + 1 - Math.log(Math.log(mod+1e-16))/log2;
+          const t = Math.min(1, Math.max(0, nu/maxIter));
+          const [rr,gg,bb] = gradient(pal, t);
+          r=rr; gc=gg; b=bb;
+        }
+        const idx = (y*w + x)*4;
+        data[idx] = r; data[idx+1]=gc; data[idx+2]=b; data[idx+3]=255;
+      }
+      row++;
+      if(row<h){
+        if(row%8===0) { g.putImageData(img,0,0); requestAnimationFrame(step); }
+        else step();
+      } else {
+        g.putImageData(img,0,0);
+        mbStat.innerHTML = `<span class="badge">${w}×${h}px @${dpr.toFixed(2)}x</span><span class="badge">Iter ${maxIter}</span>`;
+      }
+    }
+    step();
+  }
+
+  function renderJulia(){
+    const {g,w,h} = resizeCanvas(jl);
+    const img = g.createImageData(w,h);
+    const data = img.data;
+    const aspect = h/w;
+    const scale = 3.0;
+    const xmin = -scale/2, xmax = scale/2;
+    const ymin = -scale*aspect/2, ymax = scale*aspect/2;
+    const log2 = Math.log(2);
+    const cr = juliaC.re, ci = juliaC.im;
+
+    let row = 0;
+    function step(){
+      const pal = palettes[palette];
+      const y = row;
+      for(let x=0; x<w; x++){
+        let zr = xmin + (x/w) * (xmax - xmin);
+        let zi = ymax - (y/h) * (ymax - ymin);
+        let n=0, zr2=zr*zr, zi2=zi*zi;
+        for(; n<maxIter && (zr2+zi2)<=4; n++){
+          const tmp = 2*zr*zi + ci;
+          zr = zr2 - zi2 + cr;
+          zi = tmp;
+          zr2 = zr*zr; zi2 = zi*zi;
+        }
+        let r,gc,b;
+        if(n===maxIter){ r=0; gc=0; b=0; }
+        else{
+          const mod = Math.sqrt(zr2+zi2);
+          const nu = n + 1 - Math.log(Math.log(mod+1e-16))/log2;
+          const t = Math.min(1, Math.max(0, nu/maxIter));
+          const [rr,gg,bb] = gradient(pal, t);
+          r=rr; gc=gg; b=bb;
+        }
+        const idx = (y*w + x)*4;
+        data[idx]=r; data[idx+1]=gc; data[idx+2]=b; data[idx+3]=255;
+      }
+      row++;
+      if(row<h){
+        if(row%8===0){ g.putImageData(img,0,0); requestAnimationFrame(step); }
+        else step();
+      } else { g.putImageData(img,0,0); jlStat.innerHTML = `<span class="badge">c = ${juliaC.re.toFixed(6)} ${juliaC.im>=0?'+':'-'} ${Math.abs(juliaC.im).toFixed(6)}i</span>`; }
+    }
+    step();
+  }
+
+  // ===== Interação =====
+  let isDragging=false, dragStart=null, viewStart=null;
+  function redraw(){ updateSidebar(); renderMandelbrot(); renderJulia(); }
+
+  function onWheel(ev){
+    ev.preventDefault();
+    const rect = mb.getBoundingClientRect();
+    const x = (ev.clientX - rect.left) * dpr;
+    const y = (ev.clientY - rect.top) * dpr;
+    const c = screenToComplex(x, y);
+    const zoom = Math.pow(1.1, ev.deltaY>0 ? 1 : -1);
+    view.ctr.re = c.re + (view.ctr.re - c.re) * zoom;
+    view.ctr.im = c.im + (view.ctr.im - c.im) * zoom;
+    view.scale *= zoom;
+    renderMandelbrot();
+    updateSidebar();
+  }
+
+  function onDown(ev){
+    isDragging=true;
+    const rect = mb.getBoundingClientRect();
+    dragStart = {x:(ev.clientX-rect.left)*dpr, y:(ev.clientY-rect.top)*dpr};
+    viewStart = {ctr:{...view.ctr}, scale:view.scale};
+  }
+  function onMove(ev){
+    if(!isDragging) return;
+    const rect = mb.getBoundingClientRect();
+    const x = (ev.clientX-rect.left)*dpr, y=(ev.clientY-rect.top)*dpr;
+    const dx = x - dragStart.x, dy = y - dragStart.y;
+    const {width:w,height:h} = mb;
+    const aspect = h/w;
+    view.ctr.re = viewStart.ctr.re - dx/w * viewStart.scale;
+    view.ctr.im = viewStart.ctr.im + dy/h * (viewStart.scale*aspect);
+    renderMandelbrot();
+  }
+  function onUp(){ isDragging=false; }
+  function onClick(ev){
+    const rect = mb.getBoundingClientRect();
+    const x = (ev.clientX - rect.left) * dpr;
+    const y = (ev.clientY - rect.top) * dpr;
+    const c = screenToComplex(x,y);
+    juliaC = c; cVal.textContent = `${juliaC.re.toFixed(8)} ${juliaC.im>=0?'+':'-'} ${Math.abs(juliaC.im).toFixed(8)}i`;
+    cDot.style.display='block';
+    cDot.style.left = `${(x/dpr)}px`; cDot.style.top = `${(y/dpr)}px`;
+    renderJulia();
+  }
+
+  mb.addEventListener('wheel', onWheel, {passive:false});
+  mb.addEventListener('mousedown', onDown);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  mb.addEventListener('click', onClick);
+
+  // Botões
+  document.getElementById('resetBtn').onclick = () => {
+    view.ctr = makeComplex(-0.5, 0); view.scale = 3.0; renderMandelbrot(); updateSidebar();
+  };
+  document.getElementById('fitBtn').onclick = () => {
+    view.scale = 3.0; renderMandelbrot(); updateSidebar();
+  };
+  document.getElementById('swapBtn').onclick = () => {
+    const parent = document.getElementById('view');
+    parent.insertBefore(jlCard, mbCard);
+  };
+  paletteSel.onchange = () => { palette = paletteSel.value; renderMandelbrot(); renderJulia(); };
+  iterSel.onchange = () => { maxIter = parseInt(iterSel.value,10)||400; redraw(); };
+  document.getElementById('saveBtn').onclick = savePNG; redraw(); };
+
+  // ====== FIX: Throttle no ResizeObserver para evitar loops ======
+  let resizeScheduled = false;
+  const ro = new ResizeObserver(() => {
+    if (resizeScheduled) return;
+    resizeScheduled = true;
+    requestAnimationFrame(() => {
+      resizeScheduled = false;
+      renderMandelbrot();
+      renderJulia();
+    });
+  });
+  ro.observe(mb); ro.observe(jl);
+
+  // ===== Exportar PNG (ambas as visões lado a lado) =====
+  function savePNG(){
+    try{
+      // cria um canvas offscreen para compor as duas imagens
+      const pad = 20;
+      const labelH = 26;
+      const totalW = mb.width + jl.width + pad*3;
+      const totalH = Math.max(mb.height, jl.height) + pad*3 + labelH;
+      const oc = document.createElement('canvas');
+      oc.width = totalW; oc.height = totalH;
+      const g = oc.getContext('2d');
+
+      // fundo
+      g.fillStyle = '#0b0f14';
+      g.fillRect(0,0,totalW,totalH);
+
+      g.fillStyle = '#cfe4ff';
+      g.font = `${16*dpr}px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial`;
+      g.textBaseline = 'top';
+
+      // Mandelbrot
+      const mbX = pad, mbY = pad*2 + labelH;
+      g.fillText('Mandelbrot', mbX, pad);
+      g.drawImage(mb, mbX, mbY);
+
+      // Julia
+      const jlX = mbX + mb.width + pad;
+      const jlY = mbY;
+      g.fillText('Julia', jlX, pad);
+      g.drawImage(jl, jlX, jlY);
+
+      // legenda com c e parâmetros
+      g.fillStyle = '#a8b3c7';
+      const info = `c = ${juliaC.re.toFixed(8)} ${juliaC.im>=0?'+':'-'} ${Math.abs(juliaC.im).toFixed(8)}i  |  iter = ${maxIter}`;
+      g.fillText(info, pad, totalH - pad - 16*dpr);
+
+      const url = oc.toDataURL('image/png');
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().replace(/[:.]/g,'-');
+      a.download = `mandelbrot-julia-${ts}.png`;
+      a.href = url;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch(e){
+      console.error('Falha ao salvar PNG', e);
+      alert('Não foi possível gerar o PNG: ' + e.message);
+    }
+  }
+
+  // Render inicial
+  updateSidebar();
+  renderMandelbrot();
+  renderJulia();
+
+  // ===== Testes automatizados simples =====
+  function logTest(msg, ok=true){
+    const span = document.createElement('div');
+    span.innerHTML = ok ? `✅ <span class=\"ok\">${msg}</span>` : `⚠️ <span class=\"warn\">${msg}</span>`;
+    testOutput.appendChild(span);
+  }
+
+  function runTests(){
+    testOutput.innerHTML = '';
+    try {
+      renderMandelbrot(); renderJulia();
+      logTest('Render inicial completo sem exceções.');
+
+      const rect = mb.getBoundingClientRect();
+      const cx = (rect.width/2)*dpr, cy = (rect.height/2)*dpr;
+      const oldC = { ...juliaC };
+      const cnew = screenToComplex(cx, cy);
+      juliaC = cnew; updateSidebar(); renderJulia();
+      const changed = (Math.abs(oldC.re-cnew.re)>1e-12) || (Math.abs(oldC.im-cnew.im)>1e-12);
+      logTest('Clique programático atualiza c (Julia). ' + (changed? 'OK':'Mudança imperceptível'), changed);
+
+      const beforeScale = view.scale;
+      const fakeEvent = { preventDefault(){}, clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2, deltaY: -100 };
+      onWheel(fakeEvent);
+      const afterScale = view.scale;
+      logTest('Zoom altera escala e não dispara erro.', afterScale !== beforeScale);
+
+      // Novo teste: geração de PNG retorna dataURL válida
+      const pad = 10; const oc = document.createElement('canvas'); oc.width = mb.width+jl.width+pad*3; oc.height = Math.max(mb.height, jl.height)+pad*3;
+      const g = oc.getContext('2d'); g.drawImage(mb, pad, pad); g.drawImage(jl, pad*2+mb.width, pad);
+      const url = oc.toDataURL('image/png');
+      logTest('toDataURL() gerou PNG válido.', typeof url==='string' && url.startsWith('data:image/png'));
+
+    } catch(e){
+      console.error(e);
+      logTest('Exceção durante testes: ' + e.message, false);
+    }
+  }
+  document.getElementById('runTests').addEventListener('click', runTests);
+})();
+</script>
+</body>
+</html>
